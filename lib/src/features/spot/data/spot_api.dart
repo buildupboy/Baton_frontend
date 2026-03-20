@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'dart:math' as math;
 
 import '../../../core/network/api_client.dart';
 
@@ -95,6 +96,30 @@ class SpotApi {
       },
     );
   }
+
+  /// 스팟 [spotId]에 대해 체크인.
+  ///
+  /// 백엔드 응답 스펙이 확정 전이므로,
+  /// - `data`가 숫자면 그대로 points로 취급
+  /// - `data`가 Map이면 `points`/`rewardAmount` 등을 우선 탐색
+  /// 하는 형태로 최대한 방어적으로 매핑합니다.
+  Future<int> checkIn({required int spotId}) {
+    return requestJson<int>(
+      _dio,
+      () => _dio.post('/api/v1/spots/$spotId/checkin'),
+      mapper: (json) {
+        if (json is num) return json.toInt();
+        if (json is Map<String, dynamic>) {
+          final v = json['points'] ??
+              json['rewardAmount'] ??
+              json['reward'] ??
+              json['score'];
+          if (v is num) return v.toInt();
+        }
+        throw ApiException('체크인 응답 형식이 올바르지 않습니다.');
+      },
+    );
+  }
 }
 
 /// 실제 서버 없이 테스트용 스팟 데이터를 제공하는 Mock 구현.
@@ -107,65 +132,72 @@ class MockSpotApi extends SpotApi {
     required double longitude,
   }) async {
     await Future<void>.delayed(const Duration(milliseconds: 200));
-    // 서울 주요 러닝 스팟 예시
-    return const [
-      SpotSummary(
-        id: 1,
-        name: '한강 시민공원',
-        rewardAmount: 100,
-        latitude: 37.5113,
-        longitude: 126.9940,
-      ),
-      SpotSummary(
-        id: 2,
-        name: '서울숲',
-        rewardAmount: 120,
-        latitude: 37.5444,
-        longitude: 127.0374,
-      ),
-      SpotSummary(
-        id: 3,
-        name: '남산 서울타워',
-        rewardAmount: 150,
-        latitude: 37.5512,
-        longitude: 126.9882,
-      ),
-    ];
+
+    // 요청으로 들어온 현재 위치를 기준으로, 반경 200m 이내에 10개 스팟 생성
+    // (체크인/근접 로직 검증용: 위치를 조금만 움직여도 스팟이 계속 따라오게)
+    const count = 10;
+    const radiusMeters = 200.0;
+
+    final rand = math.Random(
+      // 입력 좌표에 따라 결정적으로 생성되도록 seed 고정
+      (latitude * 1e6).round() ^ (longitude * 1e6).round(),
+    );
+
+    double metersPerDegLat(double lat) => 111320.0;
+    double metersPerDegLng(double lat) =>
+        111320.0 * math.cos(lat * math.pi / 180.0).abs();
+
+    final baseLat = latitude;
+    final baseLng = longitude;
+    final mLat = metersPerDegLat(baseLat);
+    final mLng = metersPerDegLng(baseLat);
+
+    final spots = <SpotSummary>[];
+    for (var i = 0; i < count; i++) {
+      // 원판 내부에 균일하게 분포: r = sqrt(u) * R
+      final u = rand.nextDouble();
+      final r = math.sqrt(u) * radiusMeters;
+      final theta = rand.nextDouble() * 2 * math.pi;
+
+      final north = r * math.sin(theta);
+      final east = r * math.cos(theta);
+
+      final dLat = north / mLat;
+      final dLng = east / (mLng == 0 ? 1 : mLng);
+
+      spots.add(
+        SpotSummary(
+          id: i + 1,
+          name: 'Mock Spot ${i + 1}',
+          rewardAmount: 50 + (i * 10),
+          latitude: baseLat + dLat,
+          longitude: baseLng + dLng,
+        ),
+      );
+    }
+    return spots;
   }
 
   @override
   Future<SpotDetail> detail(int spotId) async {
     await Future<void>.delayed(const Duration(milliseconds: 150));
-    switch (spotId) {
-      case 1:
-        return const SpotDetail(
-          id: 1,
-          name: '한강 시민공원',
-          description: '서울에서 가장 인기 있는 러닝 코스. 야경이 특히 아름답습니다.',
-          rewardAmount: 100,
-          latitude: 37.5113,
-          longitude: 126.9940,
-        );
-      case 2:
-        return const SpotDetail(
-          id: 2,
-          name: '서울숲',
-          description: '나무와 잔디가 잘 정돈된 러닝 스팟. 도심 속 힐링 코스.',
-          rewardAmount: 120,
-          latitude: 37.5444,
-          longitude: 127.0374,
-        );
-      case 3:
-      default:
-        return const SpotDetail(
-          id: 3,
-          name: '남산 서울타워',
-          description: '언덕과 뷰가 좋은 힐코스. 체력 테스트에 제격입니다.',
-          rewardAmount: 150,
-          latitude: 37.5512,
-          longitude: 126.9882,
-        );
-    }
+    // detail은 "최근 nearby 기준"을 유지하지 않으므로, 간단히 id 기반 더미로 제공
+    final reward = 50 + ((spotId - 1).clamp(0, 9) * 10);
+    return SpotDetail(
+      id: spotId,
+      name: 'Mock Spot $spotId',
+      description: '가상 위치 체크인 테스트용 스팟입니다. (반경 200m 내 자동 생성)',
+      rewardAmount: reward,
+      latitude: 0,
+      longitude: 0,
+    );
+  }
+
+  @override
+  Future<int> checkIn({required int spotId}) async {
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    // MockNearby 생성 규칙과 동일하게 보상 계산
+    return 50 + ((spotId - 1).clamp(0, 9) * 10);
   }
 }
 
