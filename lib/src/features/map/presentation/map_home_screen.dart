@@ -4,17 +4,20 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter_naver_map/flutter_naver_map.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/network/api_client.dart';
 import '../../../core/session/session_controller.dart';
-import '../../../design/glass.dart';
 import '../../auth/auth_providers.dart';
 import '../../run/data/run_api.dart';
 import '../../run/run_providers.dart';
 import '../../spot/data/spot_api.dart';
 import '../../spot/spot_providers.dart';
+import 'map_home_view.dart';
+
+// [Fix] useMockApis가 정의되지 않아 추가 (전역 설정 파일이 있다면 import로 대체 필요)
+const bool useMockApis = true;
 
 class MapHomeScreen extends ConsumerStatefulWidget {
   const MapHomeScreen({super.key});
@@ -24,7 +27,7 @@ class MapHomeScreen extends ConsumerStatefulWidget {
 }
 
 class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
-  GoogleMapController? _map;
+  NaverMapController? _map;
   StreamSubscription<Position>? _posSub;
 
   Position? _pos;
@@ -40,8 +43,8 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
   bool _checkingIn = false;
   bool _freezeSpotsDuringRun = false;
 
-  final Map<MarkerId, Marker> _markers = {};
-  final Map<PolylineId, Polyline> _polylines = {};
+  final Map<String, NMarker> _markers = {};
+  final Map<String, NPolylineOverlay> _polylines = {};
 
   Timer? _spotsDebounce;
 
@@ -51,9 +54,9 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
   double _mockStepMeters = 15;
   int _mockAutoDir = 0;
 
-  static const _initialCam = CameraPosition(
+  static const _initialCam = NCameraPosition(
     // 한강 시민공원 근처 고정 좌표 (Mock 모드 기본)
-    target: LatLng(37.5113, 126.9940),
+    target: NLatLng(37.5113, 126.9940),
     zoom: 18,
     tilt: 45,
   );
@@ -112,16 +115,17 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
         await _applyPosition(first, animate: false, refreshSpots: true);
 
         _posSub?.cancel();
-        _posSub = Geolocator.getPositionStream(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.best,
-            distanceFilter: 5,
-          ),
-        ).listen((p) async {
-          if (!mounted) return;
-          await _applyPosition(p, animate: true, refreshSpots: false);
-          _debouncedLoadNearbySpots(p);
-        });
+        _posSub =
+            Geolocator.getPositionStream(
+              locationSettings: const LocationSettings(
+                accuracy: LocationAccuracy.best,
+                distanceFilter: 5,
+              ),
+            ).listen((p) async {
+              if (!mounted) return;
+              await _applyPosition(p, animate: true, refreshSpots: false);
+              _debouncedLoadNearbySpots(p);
+            });
       }
     } on ApiException catch (e) {
       setState(() => _error = e.message);
@@ -170,12 +174,14 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
       _pos = pos;
       if (isRunning) {
         _path.add(RunPoint(lat: pos.latitude, lng: pos.longitude));
-        _polylines[const PolylineId('run')] = Polyline(
-          polylineId: const PolylineId('run'),
-          points: _path.map((p) => LatLng(p.lat, p.lng)).toList(),
+        final polyline = NPolylineOverlay(
+          id: 'run',
+          coords: _path.map((p) => NLatLng(p.lat, p.lng)).toList(),
           width: 6,
           color: Theme.of(context).colorScheme.primary,
         );
+        _polylines['run'] = polyline;
+        _map?.addOverlay(polyline);
       }
     });
     await _moveCamera(pos, animate: animate);
@@ -185,17 +191,22 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
   }
 
   Future<void> _moveCamera(Position pos, {required bool animate}) async {
-    final cam = CameraPosition(
-      target: LatLng(pos.latitude, pos.longitude),
-      zoom: 18.0,
-      tilt: 45.0,
-      bearing: 0,
+    final cam = NCameraUpdate.fromCameraPosition(
+      NCameraPosition(
+        target: NLatLng(pos.latitude, pos.longitude),
+        zoom: 18.0,
+        tilt: 45.0,
+      ),
     );
     if (_map == null) return;
     if (animate) {
-      await _map!.animateCamera(CameraUpdate.newCameraPosition(cam));
+      cam.setAnimation(
+        animation: NCameraAnimation.easing,
+        duration: const Duration(milliseconds: 300),
+      );
+      await _map!.updateCamera(cam);
     } else {
-      await _map!.moveCamera(CameraUpdate.newCameraPosition(cam));
+      await _map!.updateCamera(cam);
     }
   }
 
@@ -216,6 +227,14 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
       final api = ref.read(runApiProvider);
       final now = DateTime.now();
       final runId = await api.start(startTimeIsoLocal: _isoLocal(now));
+
+      final polyline = NPolylineOverlay(
+        id: 'run',
+        coords: [NLatLng(pos.latitude, pos.longitude)],
+        width: 6,
+        color: Theme.of(context).colorScheme.primary,
+      );
+
       setState(() {
         _runId = runId;
         _runStart = now;
@@ -227,12 +246,8 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
         _path
           ..clear()
           ..add(RunPoint(lat: pos.latitude, lng: pos.longitude));
-        _polylines[const PolylineId('run')] = Polyline(
-          polylineId: const PolylineId('run'),
-          points: [LatLng(pos.latitude, pos.longitude)],
-          width: 6,
-          color: Theme.of(context).colorScheme.primary,
-        );
+        _polylines['run'] = polyline;
+        _map?.addOverlay(polyline);
       });
       await _moveCamera(pos, animate: true);
     } on ApiException catch (e) {
@@ -264,6 +279,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
         _checkedInSpotIds.clear();
         _checkingIn = false;
         _freezeSpotsDuringRun = false;
+        _map?.clearOverlays();
       });
 
       final p = _pos;
@@ -288,7 +304,8 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     final dLat = (lat2 - lat1) * math.pi / 180.0;
     final dLng = (lng2 - lng1) * math.pi / 180.0;
 
-    final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
+    final a =
+        math.sin(dLat / 2) * math.sin(dLat / 2) +
         math.cos(lat1 * math.pi / 180.0) *
             math.cos(lat2 * math.pi / 180.0) *
             math.sin(dLng / 2) *
@@ -336,22 +353,26 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
       final api = ref.read(spotApiProvider);
       final gained = await api.checkIn(spotId: spotId);
       // 서버 응답 points가 rewardAmount와 불일치할 수 있으므로 gained를 우선.
+
+      final id = 'spot:$spotId';
+      final marker = NMarker(
+        id: id,
+        position: NLatLng(spotSummary.latitude, spotSummary.longitude),
+        caption: NOverlayCaption(text: spotSummary.name),
+        subCaption: NOverlayCaption(
+          text: '체크됨 (+${spotSummary.rewardAmount}P)',
+        ),
+      );
+      marker.setOnTapListener((m) {
+        unawaited(_checkInSpot(spotSummary));
+      });
+
       setState(() {
         _checkedInSpotIds.add(spotId);
         _runScore += gained;
         // nearby를 다시 호출하지 않고, 체크됨 상태만 마커에 즉시 반영
-        final id = MarkerId('spot:$spotId');
-        _markers[id] = Marker(
-          markerId: id,
-          position: LatLng(spotSummary.latitude, spotSummary.longitude),
-          infoWindow: InfoWindow(
-            title: spotSummary.name,
-            snippet: '체크됨 (+${spotSummary.rewardAmount}P)',
-          ),
-          onTap: () {
-            unawaited(_checkInSpot(spotSummary));
-          },
-        );
+        _markers[id] = marker;
+        _map?.addOverlay(marker);
       });
     } on ApiException catch (e) {
       setState(() => _error = e.message);
@@ -417,26 +438,33 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
         latitude: pos.latitude,
         longitude: pos.longitude,
       );
-      final next = <MarkerId, Marker>{};
+      final next = <String, NMarker>{};
       for (final s in spots) {
-        final id = MarkerId('spot:${s.id}');
+        final id = 'spot:${s.id}';
         final checked = _checkedInSpotIds.contains(s.id);
-        next[id] = Marker(
-          markerId: id,
-          position: LatLng(s.latitude, s.longitude),
-          infoWindow: InfoWindow(
-            title: s.name,
-            snippet: checked ? '체크됨 (+${s.rewardAmount}P)' : '+${s.rewardAmount}P',
+        final marker = NMarker(
+          id: id,
+          position: NLatLng(s.latitude, s.longitude),
+          caption: NOverlayCaption(text: s.name),
+          subCaption: NOverlayCaption(
+            text: checked ? '체크됨 (+${s.rewardAmount}P)' : '+${s.rewardAmount}P',
           ),
-          onTap: () {
-            unawaited(_checkInSpot(s));
-          },
         );
+        marker.setOnTapListener((m) {
+          unawaited(_checkInSpot(s));
+        });
+        next[id] = marker;
       }
+
+      _map?.clearOverlays();
       setState(() {
         _markers
           ..clear()
           ..addAll(next);
+        _map?.addOverlayAll(_markers.values.toSet());
+        if (_polylines.containsKey('run')) {
+          _map?.addOverlay(_polylines['run']!);
+        }
       });
     } catch (_) {
       // 주변 스팟 조회 실패는 치명적이지 않으니 무시
@@ -460,297 +488,44 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final isRunning = _runId != null;
     final pos = _pos;
     final duration = (_runStart == null)
         ? null
         : DateTime.now().difference(_runStart!);
 
-    return Scaffold(
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: GoogleMap(
-              initialCameraPosition: _initialCam,
-              myLocationEnabled: true,
-              myLocationButtonEnabled: false,
-              compassEnabled: false,
-              tiltGesturesEnabled: true,
-              buildingsEnabled: true,
-              markers: Set<Marker>.of(_markers.values),
-              polylines: Set<Polyline>.of(_polylines.values),
-              onMapCreated: (c) async {
-                _map = c;
-                if (pos != null) await _moveCamera(pos, animate: false);
-              },
-            ),
-          ),
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: GlassCard(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 12,
-                          ),
-                          child: Row(
-                            children: [
-                              Container(
-                                height: 10,
-                                width: 10,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: isRunning ? scheme.tertiary : scheme.primary,
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      isRunning
-                                          ? '러닝 중 · ${duration == null ? '--:--' : _fmt(duration)} · 점수: $_runScoreP'
-                                          : '대기 중 · 주변 스팟을 확인하세요',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .titleMedium
-                                          ?.copyWith(fontWeight: FontWeight.w600),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      useMockApis
-                                          ? '테스트 모드(Mock API · 가상 위치)'
-                                          : '실제 위치 모드',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .labelSmall
-                                          ?.copyWith(color: scheme.secondary),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              IconButton(
-                                onPressed: _busy ? null : _logout,
-                                icon: const Icon(Icons.logout),
-                                tooltip: '로그아웃',
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const Spacer(),
-                  if (useMockApis)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: GlassCard(
-                        padding: const EdgeInsets.all(12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    '가상 위치 조작',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleSmall
-                                        ?.copyWith(fontWeight: FontWeight.w700),
-                                  ),
-                                ),
-                                Text(
-                                  pos == null
-                                      ? '--'
-                                      : '${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}',
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .labelSmall
-                                      ?.copyWith(color: scheme.secondary),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 10),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: SegmentedButton<double>(
-                                    segments: const [
-                                      ButtonSegment(
-                                        value: 5,
-                                        label: Text('5m'),
-                                      ),
-                                      ButtonSegment(
-                                        value: 15,
-                                        label: Text('15m'),
-                                      ),
-                                      ButtonSegment(
-                                        value: 50,
-                                        label: Text('50m'),
-                                      ),
-                                    ],
-                                    selected: {_mockStepMeters},
-                                    onSelectionChanged: _busy
-                                        ? null
-                                        : (s) {
-                                            final v = s.firstOrNull;
-                                            if (v == null) return;
-                                            setState(() => _mockStepMeters = v);
-                                          },
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                FilledButton.tonal(
-                                  onPressed: _busy ? null : _toggleMockAutoWalk,
-                                  child: Text(_mockAutoWalk ? '자동 이동 끄기' : '자동 이동'),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 10),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                IconButton.filledTonal(
-                                  onPressed: _busy
-                                      ? null
-                                      : () => _nudgeMock(
-                                            eastMeters: 0,
-                                            northMeters: _mockStepMeters,
-                                          ),
-                                  icon: const Icon(Icons.keyboard_arrow_up),
-                                  tooltip: '북쪽으로 이동',
-                                ),
-                              ],
-                            ),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                IconButton.filledTonal(
-                                  onPressed: _busy
-                                      ? null
-                                      : () => _nudgeMock(
-                                            eastMeters: -_mockStepMeters,
-                                            northMeters: 0,
-                                          ),
-                                  icon: const Icon(Icons.keyboard_arrow_left),
-                                  tooltip: '서쪽으로 이동',
-                                ),
-                                const SizedBox(width: 10),
-                                IconButton.filledTonal(
-                                  onPressed: _busy
-                                      ? null
-                                      : () => _nudgeMock(
-                                            eastMeters: _mockStepMeters,
-                                            northMeters: 0,
-                                          ),
-                                  icon: const Icon(Icons.keyboard_arrow_right),
-                                  tooltip: '동쪽으로 이동',
-                                ),
-                              ],
-                            ),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                IconButton.filledTonal(
-                                  onPressed: _busy
-                                      ? null
-                                      : () => _nudgeMock(
-                                            eastMeters: 0,
-                                            northMeters: -_mockStepMeters,
-                                          ),
-                                  icon: const Icon(Icons.keyboard_arrow_down),
-                                  tooltip: '남쪽으로 이동',
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  if (_error != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: GlassCard(
-                        child: Text(
-                          _error!,
-                          style: TextStyle(color: scheme.error),
-                        ),
-                      ),
-                    ),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: GlassCard(
-                          padding: const EdgeInsets.all(12),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: FilledButton(
-                                  onPressed: _busy
-                                      ? null
-                                      : (isRunning ? _finishRun : _startRun),
-                                  style: FilledButton.styleFrom(
-                                    backgroundColor:
-                                        isRunning ? scheme.error : scheme.primary,
-                                  ),
-                                  child: _busy
-                                      ? const SizedBox(
-                                          height: 18,
-                                          width: 18,
-                                          child: CircularProgressIndicator(strokeWidth: 2),
-                                        )
-                                      : Text(isRunning ? '종료' : '시작'),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              IconButton.filledTonal(
-                                onPressed: (pos == null || _busy)
-                                    ? null
-                                    : () async {
-                                        await _moveCamera(pos, animate: true);
-                                        await _loadNearbySpots(pos);
-                                      },
-                                icon: const Icon(Icons.my_location),
-                                tooltip: '현재 위치',
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-          if (_busy && _pos == null)
-            const Positioned.fill(
-              child: IgnorePointer(
-                child: Center(child: CircularProgressIndicator()),
-              ),
-            ),
-        ],
-      ),
+    return MapHomeView(
+      initialCameraPosition: _initialCam,
+      currentPosition: pos,
+      isRunning: _runId != null,
+      isBusy: _busy,
+      errorMsg: _error,
+      runScore: _runScore,
+      runDuration: duration,
+      useMockApis: useMockApis,
+      mockStepMeters: _mockStepMeters,
+      mockAutoWalk: _mockAutoWalk,
+      onMapReady: (c) async {
+        _map = c;
+        if (pos != null) await _moveCamera(pos, animate: false);
+        _map?.addOverlayAll(_markers.values.toSet());
+        _map?.addOverlayAll(_polylines.values.toSet());
+        setState(() {});
+      },
+      onMapTapped: (point, latLng) {
+        FocusManager.instance.primaryFocus?.unfocus();
+      },
+      onLogout: _logout,
+      onStartRun: _startRun,
+      onFinishRun: _finishRun,
+      onMoveToCurrentLocation: () async {
+        if (pos == null) return;
+        await _moveCamera(pos, animate: true);
+        await _loadNearbySpots(pos);
+      },
+      onMockChangeStep: (val) => setState(() => _mockStepMeters = val),
+      onMockToggleAutoWalk: _toggleMockAutoWalk,
+      onMockNudge: ({required east, required north}) =>
+          _nudgeMock(eastMeters: east, northMeters: north),
     );
   }
-
-  String get _runScoreP => '${_runScore}P';
-
-  String _fmt(Duration d) {
-    final mm = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final ss = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return '$mm:$ss';
-  }
 }
-
