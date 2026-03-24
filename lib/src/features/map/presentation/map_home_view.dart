@@ -64,6 +64,7 @@ class MapHomeView extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final pos = currentPosition;
+    final bottomSafe = MediaQuery.of(context).padding.bottom;
 
     return Scaffold(
       body: Stack(
@@ -77,6 +78,9 @@ class MapHomeView extends StatelessWidget {
                 tiltGesturesEnable: true,
                 indoorEnable: true,
                 locale: const Locale('ko'),
+                // [Fix] 네비게이션 바(약 90px) + 하단 안전 영역(Safe Area)만큼
+                // 지도 내부 패딩을 주어 로고와 중심점이 가려지지 않게 설정
+                contentPadding: EdgeInsets.only(bottom: 90 + bottomSafe),
               ),
               onMapReady: onMapReady,
               onMapTapped: onMapTapped,
@@ -335,6 +339,9 @@ class MapHomeView extends StatelessWidget {
                       ),
                     ],
                   ),
+
+                  // [Fix] 하단 탭바(CustomBottomBar) 높이만큼 여백 추가 (버튼이 가려지지 않도록)
+                  const SizedBox(height: 90),
                 ],
               ),
             ),
