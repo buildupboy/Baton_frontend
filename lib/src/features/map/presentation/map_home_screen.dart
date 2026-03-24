@@ -15,6 +15,7 @@ import '../../run/run_providers.dart';
 import '../../spot/data/spot_api.dart';
 import '../../spot/spot_providers.dart';
 import 'map_home_view.dart';
+import 'mock_location_controller.dart';
 
 // [Fix] useMockApis가 정의되지 않아 추가 (전역 설정 파일이 있다면 import로 대체 필요)
 const bool useMockApis = true;
@@ -38,6 +39,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
   DateTime? _runStart;
   final List<RunPoint> _path = [];
 
+  List<SpotSummary> _nearbySpots = [];
   final Set<int> _checkedInSpotIds = <int>{};
   int _runScore = 0;
   bool _checkingIn = false;
@@ -48,17 +50,19 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
 
   Timer? _spotsDebounce;
 
-  // Mock location controls (only used when useMockApis == true)
-  Timer? _mockAutoTimer;
-  bool _mockAutoWalk = false;
-  double _mockStepMeters = 15;
-  int _mockAutoDir = 0;
+  MockLocationController? _mockController;
+
+  // [Fix] 초기 로딩 시와 추적 시의 설정을 분리하여 관리
+  static const double _initZoom = 13.0; // 시작 시 넓게 보기
+  static const double _initTilt = 0.0; // 시작 시 비스듬히 보기
+  static const double _trackingZoom = 18.0; // 위치 추적 시 확대
+  static const double _trackingTilt = 60.0; // 위치 추적 시 수직 뷰
 
   static const _initialCam = NCameraPosition(
     // 한강 시민공원 근처 고정 좌표 (Mock 모드 기본)
     target: NLatLng(37.5113, 126.9940),
-    zoom: 18,
-    tilt: 45,
+    zoom: _initZoom,
+    tilt: _initTilt,
   );
 
   @override
@@ -70,7 +74,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
   @override
   void dispose() {
     _spotsDebounce?.cancel();
-    _mockAutoTimer?.cancel();
+    _mockController?.dispose();
     _posSub?.cancel();
     super.dispose();
   }
@@ -84,11 +88,16 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     try {
       if (useMockApis) {
         // Mock 모드에서는 실제 GPS 대신 가상 위치를 사용(버튼/자동이동으로 조작)
-        final pos = _mockPosition(
-          lat: 37.5113,
-          lng: 126.9940,
-          ts: DateTime.now(),
+        _mockController = MockLocationController(
+          onPositionChanged: (p) async {
+            if (!mounted) return;
+            await _applyPosition(p, animate: true, refreshSpots: false);
+            _debouncedLoadNearbySpots(p);
+          },
+          onStateChanged: () => setState(() {}),
         );
+
+        final pos = _mockController!.initPosition(lat: 37.5113, lng: 126.9940);
         _path
           ..clear()
           ..add(RunPoint(lat: pos.latitude, lng: pos.longitude));
@@ -136,25 +145,6 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     }
   }
 
-  Position _mockPosition({
-    required double lat,
-    required double lng,
-    required DateTime ts,
-  }) {
-    return Position(
-      latitude: lat,
-      longitude: lng,
-      timestamp: ts,
-      accuracy: 0,
-      altitude: 0,
-      heading: 0,
-      speed: 0,
-      speedAccuracy: 0,
-      altitudeAccuracy: 0,
-      headingAccuracy: 0,
-    );
-  }
-
   void _debouncedLoadNearbySpots(Position pos) {
     if (_runId != null && _freezeSpotsDuringRun) return;
     _spotsDebounce?.cancel();
@@ -174,40 +164,62 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
       _pos = pos;
       if (isRunning) {
         _path.add(RunPoint(lat: pos.latitude, lng: pos.longitude));
-        final polyline = NPolylineOverlay(
-          id: 'run',
-          coords: _path.map((p) => NLatLng(p.lat, p.lng)).toList(),
-          width: 6,
-          color: Theme.of(context).colorScheme.primary,
-        );
-        _polylines['run'] = polyline;
-        _map?.addOverlay(polyline);
+        // [Fix] Polyline은 좌표가 최소 2개 이상이어야 생성 가능 (네이티브 크래시 방지)
+        if (_path.length >= 2) {
+          final polyline = NPolylineOverlay(
+            id: 'run',
+            coords: _path.map((p) => NLatLng(p.lat, p.lng)).toList(),
+            width: 6,
+            color: Theme.of(context).colorScheme.primary,
+          );
+          _polylines['run'] = polyline;
+          _map?.addOverlay(polyline);
+        }
       }
     });
-    await _moveCamera(pos, animate: animate);
+    final targetZoom = (_runId != null) ? _trackingZoom : _initZoom;
+    final targetTilt = (_runId != null) ? _trackingTilt : _initTilt;
+
+    await _moveCamera(
+      pos,
+      animate: animate,
+      zoom: targetZoom,
+      tilt: targetTilt,
+    );
+
     if (refreshSpots) {
       await _loadNearbySpots(pos);
     }
+
+    // [Fix] 위치 변경 시 15m 이내 스팟이 있으면 자동 체크인 시도
+    _tryAutoCheckIn(pos);
   }
 
-  Future<void> _moveCamera(Position pos, {required bool animate}) async {
+  // MapHomeScreen 상태 클래스 내부
+  Future<void> _moveCamera(
+    Position pos, {
+    required bool animate,
+    double? zoom, // 선택적 파라미터로 변경
+    double? tilt, // 선택적 파라미터로 변경
+  }) async {
+    if (_map == null) return;
+
     final cam = NCameraUpdate.fromCameraPosition(
       NCameraPosition(
         target: NLatLng(pos.latitude, pos.longitude),
-        zoom: 18.0,
-        tilt: 45.0,
+        // 파라미터가 있으면 그 값을 쓰고, 없으면 기본 추적 값(_trackingZoom) 사용
+        zoom: zoom ?? _trackingZoom,
+        tilt: tilt ?? _trackingTilt,
       ),
     );
-    if (_map == null) return;
+
     if (animate) {
       cam.setAnimation(
         animation: NCameraAnimation.easing,
         duration: const Duration(milliseconds: 300),
       );
-      await _map!.updateCamera(cam);
-    } else {
-      await _map!.updateCamera(cam);
     }
+    await _map!.updateCamera(cam);
   }
 
   String _isoLocal(DateTime dt) {
@@ -228,13 +240,6 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
       final now = DateTime.now();
       final runId = await api.start(startTimeIsoLocal: _isoLocal(now));
 
-      final polyline = NPolylineOverlay(
-        id: 'run',
-        coords: [NLatLng(pos.latitude, pos.longitude)],
-        width: 6,
-        color: Theme.of(context).colorScheme.primary,
-      );
-
       setState(() {
         _runId = runId;
         _runStart = now;
@@ -246,10 +251,15 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
         _path
           ..clear()
           ..add(RunPoint(lat: pos.latitude, lng: pos.longitude));
-        _polylines['run'] = polyline;
-        _map?.addOverlay(polyline);
+        // [Fix] 점이 1개일 때는 Polyline을 그릴 수 없으므로 오버레이 갱신 로직 제거
+        _polylines.remove('run');
       });
-      await _moveCamera(pos, animate: true);
+      await _moveCamera(
+        pos,
+        animate: true,
+        zoom: _trackingZoom,
+        tilt: _trackingTilt,
+      );
     } on ApiException catch (e) {
       setState(() => _error = e.message);
     } finally {
@@ -285,6 +295,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
       final p = _pos;
       if (p != null) {
         // 러닝 종료 후 1회만 주변 스팟 갱신
+        await _moveCamera(p, animate: true, zoom: _initZoom, tilt: _initTilt);
         await _loadNearbySpots(p);
       }
     } on ApiException catch (e) {
@@ -383,51 +394,24 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     }
   }
 
-  void _nudgeMock({required double eastMeters, required double northMeters}) {
-    if (!useMockApis) return;
-    final cur = _pos;
-    if (cur == null) return;
+  void _tryAutoCheckIn(Position pos) {
+    // 러닝 중이 아니면 자동 체크인 하지 않음
+    if (_runId == null) return;
 
-    final lat = cur.latitude;
-    final metersPerDegLat = 111320.0;
-    final metersPerDegLng = 111320.0 * math.cos(lat * math.pi / 180.0).abs();
+    for (final spot in _nearbySpots) {
+      if (_checkedInSpotIds.contains(spot.id)) continue;
 
-    final dLat = northMeters / metersPerDegLat;
-    final dLng = eastMeters / (metersPerDegLng == 0 ? 1 : metersPerDegLng);
+      final dist = _distanceMeters(
+        lat1: pos.latitude,
+        lng1: pos.longitude,
+        lat2: spot.latitude,
+        lng2: spot.longitude,
+      );
 
-    final next = _mockPosition(
-      lat: lat + dLat,
-      lng: cur.longitude + dLng,
-      ts: DateTime.now(),
-    );
-    unawaited(_applyPosition(next, animate: true, refreshSpots: false));
-    _debouncedLoadNearbySpots(next);
-  }
-
-  void _toggleMockAutoWalk() {
-    if (!useMockApis) return;
-    setState(() => _mockAutoWalk = !_mockAutoWalk);
-
-    _mockAutoTimer?.cancel();
-    if (!_mockAutoWalk) return;
-
-    _mockAutoDir = 0;
-    _mockAutoTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted || !_mockAutoWalk) return;
-      // 간단히 사각형으로 반복 이동 (N → E → S → W)
-      switch (_mockAutoDir % 4) {
-        case 0:
-          _nudgeMock(eastMeters: 0, northMeters: _mockStepMeters);
-        case 1:
-          _nudgeMock(eastMeters: _mockStepMeters, northMeters: 0);
-        case 2:
-          _nudgeMock(eastMeters: 0, northMeters: -_mockStepMeters);
-        case 3:
-        default:
-          _nudgeMock(eastMeters: -_mockStepMeters, northMeters: 0);
+      if (dist <= 15.0) {
+        _checkInSpot(spot);
       }
-      _mockAutoDir++;
-    });
+    }
   }
 
   Future<void> _loadNearbySpots(Position pos) async {
@@ -438,6 +422,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
         latitude: pos.latitude,
         longitude: pos.longitude,
       );
+      _nearbySpots = spots;
       final next = <String, NMarker>{};
       for (final s in spots) {
         final id = 'spot:${s.id}';
@@ -502,14 +487,29 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
       runScore: _runScore,
       runDuration: duration,
       useMockApis: useMockApis,
-      mockStepMeters: _mockStepMeters,
-      mockAutoWalk: _mockAutoWalk,
+      mockStepMeters: _mockController?.stepMeters ?? 15,
+      mockAutoWalk: _mockController?.isAutoWalk ?? false,
       onMapReady: (c) async {
         _map = c;
-        if (pos != null) await _moveCamera(pos, animate: false);
+
+        // 1. 렌더링 안정화를 위해 잠시 대기
+        await Future.delayed(const Duration(milliseconds: 500));
+
+        // 2. 현재 위치(pos)가 있다면, 초기 줌(17.0)과 틸트(45.0)를 강제로 적용
+        if (pos != null) {
+          await _moveCamera(
+            pos,
+            animate: true,
+            zoom: _initZoom, // 17.0 강제 지정
+            tilt: _initTilt, // 45.0 강제 지정
+          );
+        }
+
+        // 3. 나머지 오버레이 추가
         _map?.addOverlayAll(_markers.values.toSet());
         _map?.addOverlayAll(_polylines.values.toSet());
-        setState(() {});
+
+        if (mounted) setState(() {});
       },
       onMapTapped: (point, latLng) {
         FocusManager.instance.primaryFocus?.unfocus();
@@ -522,10 +522,10 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
         await _moveCamera(pos, animate: true);
         await _loadNearbySpots(pos);
       },
-      onMockChangeStep: (val) => setState(() => _mockStepMeters = val),
-      onMockToggleAutoWalk: _toggleMockAutoWalk,
+      onMockChangeStep: (val) => _mockController?.setStepMeters(val),
+      onMockToggleAutoWalk: () => _mockController?.toggleAutoWalk(),
       onMockNudge: ({required east, required north}) =>
-          _nudgeMock(eastMeters: east, northMeters: north),
+          _mockController?.nudge(eastMeters: east, northMeters: north),
     );
   }
 }

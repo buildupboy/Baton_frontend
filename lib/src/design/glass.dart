@@ -1,5 +1,3 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 
 class GlassCard extends StatelessWidget {
@@ -23,23 +21,18 @@ class GlassCard extends StatelessWidget {
 
     Color alpha(Color c, double a) => c.withAlpha((a * 255).round());
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(borderRadius),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: alpha(isDark ? Colors.white : scheme.surface, 0.08),
-            borderRadius: BorderRadius.circular(borderRadius),
-            border: Border.all(
-              color: alpha(isDark ? Colors.white : Colors.black, 0.10),
-              width: 1,
-            ),
-          ),
-          child: Padding(padding: padding, child: child),
+    return Container(
+      decoration: BoxDecoration(
+        // [Fix] 블러 제거 (BackdropFilter 삭제) 및 배경 불투명도 상향 (0.08 -> 0.90)
+        // 다크 모드에서도 가독성을 위해 surface 색상 사용
+        color: alpha(scheme.surface, 0.90),
+        borderRadius: BorderRadius.circular(borderRadius),
+        border: Border.all(
+          color: alpha(isDark ? Colors.white : Colors.black, 0.10),
+          width: 1,
         ),
       ),
+      child: Padding(padding: padding, child: child),
     );
   }
 }
-
