@@ -222,79 +222,110 @@ class MapHomeView extends StatelessWidget {
 
                   const Spacer(),
 
-                  // 가상 위치 조작 패널
+                  // [개선] 가상 위치 조작 패널 (러닝머신 스타일)
                   if (useMockApis)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 10),
                       child: GlassCard(
-                        padding: const EdgeInsets.all(12),
+                        padding: const EdgeInsets.all(15),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Expanded(
-                                  child: Text(
-                                    '가상 위치 조작',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleSmall
-                                        ?.copyWith(fontWeight: FontWeight.w700),
-                                  ),
-                                ),
                                 Text(
-                                  pos == null
-                                      ? '--'
-                                      : '${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}',
-                                  style: Theme.of(context).textTheme.labelSmall
-                                      ?.copyWith(color: scheme.secondary),
+                                  'Mock Runner',
+                                  style: Theme.of(context).textTheme.titleSmall
+                                      ?.copyWith(
+                                        fontWeight: FontWeight.w800,
+                                        color: scheme.primary,
+                                      ),
+                                ),
+                                if (mockAutoWalk)
+                                  const _BlinkingDot(), // 아래 커스텀 위젯 추가
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+
+                            // 1. 속도(페이스) 선택 레이블
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons.speed,
+                                  size: 16,
+                                  color: Colors.grey,
+                                ),
+                                const SizedBox(width: 5),
+                                Text(
+                                  "테스트 속도: ${mockStepMeters.toStringAsFixed(1)} m/s "
+                                  "(${(60 / (mockStepMeters * 3.6)).toStringAsFixed(1)}' Pace)",
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey,
+                                  ),
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 10),
+                            const SizedBox(height: 8),
+
+                            // 2. 속도 조절 SegmentedButton (5m/15m 대신 실제 페이스 위주로 변경 추천)
+                            SegmentedButton<double>(
+                              showSelectedIcon: false,
+                              segments: const [
+                                ButtonSegment(
+                                  value: 2.77,
+                                  label: Text('6\'00'),
+                                ),
+                                ButtonSegment(
+                                  value: 3.33,
+                                  label: Text('5\'00'),
+                                ),
+                                ButtonSegment(
+                                  value: 4.16,
+                                  label: Text('4\'00'),
+                                ),
+                                ButtonSegment(
+                                  value: 5.55,
+                                  label: Text('3\'00'),
+                                ),
+                              ],
+                              selected: {mockStepMeters},
+                              onSelectionChanged: isBusy
+                                  ? null
+                                  : (s) => onMockChangeStep(s.first),
+                            ),
+                            const SizedBox(height: 12),
+
+                            // 3. 메인 컨트롤 (자동 이동 & 수동 이동)
                             Row(
                               children: [
                                 Expanded(
-                                  child: SegmentedButton<double>(
-                                    segments: const [
-                                      ButtonSegment(
-                                        value: 5.0,
-                                        label: Text('5m'),
-                                      ),
-                                      ButtonSegment(
-                                        value: 15.0,
-                                        label: Text('15m'),
-                                      ),
-                                      ButtonSegment(
-                                        value: 50.0,
-                                        label: Text('50m'),
-                                      ),
-                                    ],
-                                    selected: {mockStepMeters},
-                                    onSelectionChanged: isBusy
+                                  flex: 2,
+                                  child: FilledButton.icon(
+                                    onPressed: isBusy
                                         ? null
-                                        : (s) {
-                                            final v = s.firstOrNull;
-                                            if (v != null) onMockChangeStep(v);
-                                          },
+                                        : onMockToggleAutoWalk,
+                                    style: FilledButton.styleFrom(
+                                      backgroundColor: mockAutoWalk
+                                          ? scheme.errorContainer
+                                          : scheme.primaryContainer,
+                                      foregroundColor: mockAutoWalk
+                                          ? scheme.error
+                                          : scheme.onPrimaryContainer,
+                                    ),
+                                    icon: Icon(
+                                      mockAutoWalk
+                                          ? Icons.pause_circle
+                                          : Icons.play_circle,
+                                    ),
+                                    label: Text(
+                                      mockAutoWalk ? '시뮬레이션 중단' : '자동 이동 시작',
+                                    ),
                                   ),
                                 ),
-                                const SizedBox(width: 10),
-                                FilledButton.tonal(
-                                  onPressed: isBusy
-                                      ? null
-                                      : onMockToggleAutoWalk,
-                                  child: Text(
-                                    mockAutoWalk ? '자동 이동 끄기' : '자동 이동',
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 10),
-                            // D-Pad Controls
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
+                                const SizedBox(width: 8),
+                                // 수동 넛지(Nudge)는 이제 '순간이동'이 아니라 '위치 보정'용으로 활용
                                 IconButton.filledTonal(
                                   onPressed: isBusy
                                       ? null
@@ -302,45 +333,8 @@ class MapHomeView extends StatelessWidget {
                                           east: 0,
                                           north: mockStepMeters,
                                         ),
-                                  icon: const Icon(Icons.keyboard_arrow_up),
-                                ),
-                              ],
-                            ),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                IconButton.filledTonal(
-                                  onPressed: isBusy
-                                      ? null
-                                      : () => onMockNudge(
-                                          east: -mockStepMeters,
-                                          north: 0,
-                                        ),
-                                  icon: const Icon(Icons.keyboard_arrow_left),
-                                ),
-                                const SizedBox(width: 10),
-                                IconButton.filledTonal(
-                                  onPressed: isBusy
-                                      ? null
-                                      : () => onMockNudge(
-                                          east: mockStepMeters,
-                                          north: 0,
-                                        ),
-                                  icon: const Icon(Icons.keyboard_arrow_right),
-                                ),
-                              ],
-                            ),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                IconButton.filledTonal(
-                                  onPressed: isBusy
-                                      ? null
-                                      : () => onMockNudge(
-                                          east: 0,
-                                          north: -mockStepMeters,
-                                        ),
-                                  icon: const Icon(Icons.keyboard_arrow_down),
+                                  icon: const Icon(Icons.north),
+                                  tooltip: "북쪽으로 한 걸음",
                                 ),
                               ],
                             ),
@@ -348,8 +342,6 @@ class MapHomeView extends StatelessWidget {
                         ),
                       ),
                     ),
-
-                  // 에러 메시지
                   if (errorMsg != null)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 10),
@@ -418,6 +410,46 @@ class MapHomeView extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _BlinkingDot extends StatefulWidget {
+  const _BlinkingDot();
+  @override
+  State<_BlinkingDot> createState() => _BlinkingDotState();
+}
+
+class _BlinkingDotState extends State<_BlinkingDot>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 1),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _controller,
+      child: Container(
+        width: 8,
+        height: 8,
+        decoration: const BoxDecoration(
+          color: Colors.red,
+          shape: BoxShape.circle,
+        ),
       ),
     );
   }
