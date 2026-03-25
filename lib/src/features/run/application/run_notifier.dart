@@ -14,6 +14,7 @@ final runProvider = NotifierProvider<RunNotifier, RunMetrics>(() {
   return RunNotifier();
 });
 
+// [변경] Notifier<T>를 상속받습니다.
 class RunNotifier extends Notifier<RunMetrics> {
   StreamSubscription<Position>? _positionStream;
   Timer? _timer;
@@ -24,7 +25,10 @@ class RunNotifier extends Notifier<RunMetrics> {
 
   @override
   RunMetrics build() {
-    ref.onDispose(() => stopRunning());
+    // 위젯이 종료될 때 자원을 자동 해제하도록 설정
+    ref.onDispose(() {
+      stopRunning();
+    });
     return RunMetrics.initial();
   }
 
@@ -45,12 +49,13 @@ class RunNotifier extends Notifier<RunMetrics> {
   void _startTimer() {
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      final newDuration = state.duration + const Duration(seconds: 1);
       state = RunMetrics(
         distance: state.distance,
-        duration: newDuration,
-        currentPace: state.currentPace,
-        averagePace: _calculatePace(state.distance, newDuration.inSeconds),
+        duration: state.duration + const Duration(seconds: 1),
+        currentPace: _calculatePace(
+          state.distance,
+          state.duration.inSeconds + 1,
+        ),
       );
     });
   }
@@ -61,7 +66,7 @@ class RunNotifier extends Notifier<RunMetrics> {
         Geolocator.getPositionStream(
           locationSettings: const LocationSettings(
             accuracy: LocationAccuracy.high,
-            distanceFilter: 2, // 2미터 이동 시마다 업데이트
+            distanceFilter: 5,
           ),
         ).listen((Position position) {
           final now = DateTime.now();
@@ -152,7 +157,7 @@ class RunNotifier extends Notifier<RunMetrics> {
 
   // 전체 평균 페이스 계산 (초/km 단위 반환)
   double _calculatePace(double distanceMeters, int seconds) {
-    if (distanceMeters < 10 || seconds <= 0) return 0.0;
+    if (distanceMeters < 10) return 0.0;
     return seconds / (distanceMeters / 1000);
   }
 
