@@ -3,6 +3,7 @@ import 'package:flutter_naver_map/flutter_naver_map.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../../../design/glass.dart';
+import '../../run/domain/run_metrics.dart';
 
 class MapHomeView extends StatelessWidget {
   const MapHomeView({
@@ -16,6 +17,7 @@ class MapHomeView extends StatelessWidget {
     required this.errorMsg,
     required this.runScore,
     required this.runDuration,
+    required this.runMetrics,
     required this.useMockApis,
     required this.mockStepMeters,
     required this.mockAutoWalk,
@@ -38,6 +40,7 @@ class MapHomeView extends StatelessWidget {
   final String? errorMsg;
   final int runScore;
   final Duration? runDuration;
+  final RunMetrics runMetrics; // [New] 러닝 지표 데이터
 
   // Mock Mode Props
   final bool useMockApis;
@@ -58,6 +61,27 @@ class MapHomeView extends StatelessWidget {
     final mm = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final ss = d.inSeconds.remainder(60).toString().padLeft(2, '0');
     return '$mm:$ss';
+  }
+
+  // [New] 대시보드 내 시간 포맷팅 (시:분:초)
+  String _formatFullDuration(Duration d) {
+    String twoDigits(int n) => n.toString().padLeft(2, "0");
+    return "${twoDigits(d.inHours)}:${twoDigits(d.inMinutes.remainder(60))}:${twoDigits(d.inSeconds.remainder(60))}";
+  }
+
+  // [New] 대시보드 아이템 위젯
+  Widget _buildStatItem(String label, String value) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+      ],
+    );
   }
 
   @override
@@ -91,7 +115,7 @@ class MapHomeView extends StatelessWidget {
               padding: const EdgeInsets.all(14),
               child: Column(
                 children: [
-                  // 상단 상태 바
+                  // 상단 상태 바 (기존 유지)
                   Row(
                     children: [
                       Expanded(
@@ -155,6 +179,47 @@ class MapHomeView extends StatelessWidget {
                       ),
                     ],
                   ),
+
+                  // [New] 러닝 페이스/거리 대시보드 (러닝 중에만 표시)
+                  if (isRunning)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 10),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 20,
+                          horizontal: 15,
+                        ),
+                        decoration: BoxDecoration(
+                          color: scheme.surface.withValues(alpha: 0.9),
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.1),
+                              blurRadius: 10,
+                              offset: const Offset(0, 5),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceAround,
+                          children: [
+                            _buildStatItem(
+                              "페이스",
+                              runMetrics.formattedCurrentPace,
+                            ),
+                            _buildStatItem(
+                              "거리",
+                              "${runMetrics.formattedDistance} km",
+                            ),
+                            _buildStatItem(
+                              "시간",
+                              _formatFullDuration(runMetrics.duration),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
                   const Spacer(),
 
                   // 가상 위치 조작 패널

@@ -10,6 +10,7 @@ import 'package:intl/intl.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/session/session_controller.dart';
 import '../../auth/auth_providers.dart';
+import '../../run/application/run_notifier.dart';
 import '../../run/data/run_api.dart';
 import '../../run/run_providers.dart';
 import '../../spot/data/spot_api.dart';
@@ -93,6 +94,11 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
             if (!mounted) return;
             await _applyPosition(p, animate: true, refreshSpots: false);
             _debouncedLoadNearbySpots(p);
+
+            // [Fix] Mock 모드일 때 러닝 중이라면 위치 정보를 Notifier에 수동 주입
+            if (_runId != null) {
+              ref.read(runProvider.notifier).updatePosition(p);
+            }
           },
           onStateChanged: () => setState(() {}),
         );
@@ -240,6 +246,10 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
       final now = DateTime.now();
       final runId = await api.start(startTimeIsoLocal: _isoLocal(now));
 
+      // [New] 러닝 지표 트래킹 시작
+      // [Fix] Mock 모드면 내부 GPS 구독 끄기 (수동 주입 사용)
+      ref.read(runProvider.notifier).startRunning(useGeolocator: !useMockApis);
+
       setState(() {
         _runId = runId;
         _runStart = now;
@@ -283,6 +293,10 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
         endTimeIsoLocal: _isoLocal(DateTime.now()),
         path: List<RunPoint>.from(_path),
       );
+
+      // [New] 러닝 지표 트래킹 종료
+      ref.read(runProvider.notifier).stopRunning();
+
       setState(() {
         _runId = null;
         _runStart = null;
@@ -473,6 +487,9 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // [New] 실시간 러닝 지표 구독
+    final runMetrics = ref.watch(runProvider);
+
     final pos = _pos;
     final duration = (_runStart == null)
         ? null
@@ -486,6 +503,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
       errorMsg: _error,
       runScore: _runScore,
       runDuration: duration,
+      runMetrics: runMetrics, // [New] View에 전달
       useMockApis: useMockApis,
       mockStepMeters: _mockController?.stepMeters ?? 15,
       mockAutoWalk: _mockController?.isAutoWalk ?? false,
