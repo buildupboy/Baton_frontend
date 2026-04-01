@@ -4,7 +4,9 @@ import 'package:flutter_naver_map/flutter_naver_map.dart';
 /// 지도에서 한 지점을 탭해 좌표를 선택하는 전체 화면.
 /// 선택 완료 시 `Navigator.pop(context, NLatLng)`로 결과를 반환합니다.
 class LocationPickerScreen extends StatefulWidget {
-  const LocationPickerScreen({super.key});
+  const LocationPickerScreen({super.key, this.initialLatLng});
+
+  final NLatLng? initialLatLng;
 
   static const Color _submitOrange = Color(0xFFF7673B);
 
@@ -21,25 +23,31 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
   NaverMapController? _map;
   NMarker? _marker;
   NLatLng? _selectedLatLng;
+  NLatLng? _pendingTapLatLng;
 
   Future<void> _onMapTapped(NPoint _, NLatLng latLng) async {
     final map = _map;
-    if (map == null) return;
-
-    final previous = _marker;
-    final next = NMarker(
-      id: 'location_pick_marker',
-      position: latLng,
-      iconTintColor: Colors.red,
-    );
-
-    if (previous != null) {
-      await map.deleteOverlay(previous.info);
+    if (map == null) {
+      setState(() {
+        _pendingTapLatLng = latLng;
+        _selectedLatLng = latLng;
+      });
+      return;
     }
-    await map.addOverlay(next);
+
+    if (_marker == null) {
+      final next = NMarker(
+        id: 'location_pick_marker',
+        position: latLng,
+        iconTintColor: Colors.red,
+      );
+      await map.addOverlay(next);
+      _marker = next;
+    } else {
+      _marker!.setPosition(latLng);
+    }
 
     setState(() {
-      _marker = next;
       _selectedLatLng = latLng;
     });
   }
@@ -68,6 +76,22 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
             ),
             onMapReady: (controller) {
               _map = controller;
+              final initial = widget.initialLatLng;
+              if (initial != null) {
+                controller.updateCamera(
+                  NCameraUpdate.fromCameraPosition(
+                    NCameraPosition(target: initial, zoom: 16),
+                  ),
+                );
+                _onMapTapped(NPoint(0,0), initial);
+                return;
+              }
+
+              final pending = _pendingTapLatLng;
+              if (pending != null) {
+                _pendingTapLatLng = null;
+                _onMapTapped(NPoint(0,0), pending);
+              }
             },
             onMapTapped: _onMapTapped,
           ),

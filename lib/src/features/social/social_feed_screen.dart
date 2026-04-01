@@ -6,14 +6,39 @@ import 'models/run_card_data.dart';
 import 'room_detail_screen.dart';
 import 'widgets/group_run_card.dart';
 
-class SocialFeedScreen extends StatelessWidget {
+class SocialFeedScreen extends StatefulWidget {
   const SocialFeedScreen({super.key});
+
+  @override
+  State<SocialFeedScreen> createState() => _SocialFeedScreenState();
+}
+
+class _SocialFeedScreenState extends State<SocialFeedScreen> {
+  late final List<RunCardData> _cards;
 
   static const Color _pointOrange = Color(0xFFF7673B);
 
   @override
+  void initState() {
+    super.initState();
+    _cards = List<RunCardData>.from(_dummyCards);
+  }
+
+  Future<void> _openCreateScreen() async {
+    final created = await Navigator.of(context).push<RunCardData>(
+      MaterialPageRoute<RunCardData>(
+        builder: (_) => const CreateRoomScreen(),
+      ),
+    );
+    if (!mounted || created == null) return;
+    setState(() {
+      _cards.insert(0, created);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final cards = _dummyCards;
+    final cards = _cards;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF4F4F4),
@@ -116,13 +141,7 @@ class SocialFeedScreen extends StatelessWidget {
         ),
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) => const CreateRoomScreen(),
-            ),
-          );
-        },
+        onPressed: _openCreateScreen,
         backgroundColor: _pointOrange,
         foregroundColor: Colors.white,
         elevation: 2,

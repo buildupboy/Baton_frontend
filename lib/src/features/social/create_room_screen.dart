@@ -2,8 +2,11 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_naver_map/flutter_naver_map.dart';
 import 'package:geocoding/geocoding.dart';
+import 'package:dio/dio.dart';
+import 'package:intl/intl.dart';
 
 import 'location_picker_screen.dart';
+import 'models/run_card_data.dart';
 import 'widgets/custom_input_field.dart';
 
 class CreateRoomScreen extends StatefulWidget {
@@ -18,13 +21,9 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
   static const Color _submitOrange = Color(0xFFF7673B);
   static const Color _accentBrown = Color(0xFFB33010);
 
-  static const List<String> _distanceOptions = [
-    '3km',
-    '5km',
-    '7km',
-    '10km',
-    '15km',
-    '21km',
+  static final List<String> _distanceOptions = [
+    ...List<String>.generate(42, (i) => '${i + 1}km'),
+    '42.195km',
   ];
 
   final _titleController = TextEditingController();
@@ -39,7 +38,9 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
   TimeOfDay _startTime = const TimeOfDay(hour: 20, minute: 0);
   TimeOfDay _endTime = const TimeOfDay(hour: 21, minute: 30);
   int _memberCount = 2;
-  int _distanceIndex = 1;
+  int _distanceIndex = 4;
+  NLatLng? _selectedLatLng;
+  bool _isSubmitting = false;
 
   @override
   void initState() {
@@ -83,10 +84,11 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
   Future<void> _openMapPicker() async {
     final selected = await Navigator.of(context).push<NLatLng>(
       MaterialPageRoute<NLatLng>(
-        builder: (_) => const LocationPickerScreen(),
+        builder: (_) => LocationPickerScreen(initialLatLng: _selectedLatLng),
       ),
     );
     if (!mounted || selected == null) return;
+    _selectedLatLng = selected;
 
     try {
       await setLocaleIdentifier('ko_KR');
@@ -116,23 +118,149 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
     }
   }
 
-  /// [Placemark]에서 시·구·동 형태의 한국어 한 줄 주소를 만듭니다.
+  /// [Placemark]에서 최대한 상세한 도로명 주소 한 줄을 만듭니다.
   String _koreanAddressLine(Placemark p) {
     final parts = <String>[];
     void add(String? s) {
       final t = s?.trim();
-      if (t != null && t.isNotEmpty) parts.add(t);
+      if (t != null && t.isNotEmpty && !parts.contains(t)) {
+        parts.add(t);
+      }
     }
 
     add(p.administrativeArea);
+    add(p.subAdministrativeArea);
     add(p.locality);
     add(p.subLocality);
+    add(p.thoroughfare);
+    add(p.subThoroughfare);
+    if (parts.length < 3) {
+      add(p.street);
+      add(p.name);
+    }
     if (parts.isEmpty) {
-      add(p.subAdministrativeArea);
       add(p.street);
       add(p.name);
     }
     return parts.join(' ');
+  }
+
+  int _distanceValueFromOption(String option) {
+    if (option == '42.195km') return 42;
+    return int.tryParse(option.replaceAll('km', '')) ?? 5;
+  }
+
+  DateTime _combineDateAndTime(DateTime baseDate, TimeOfDay time) {
+    return DateTime(
+      baseDate.year,
+      baseDate.month,
+      baseDate.day,
+      time.hour,
+      time.minute,
+    );
+  }
+
+  String _formatFeedTime(DateTime dateTime) {
+    final isPm = dateTime.hour >= 12;
+    final hour12 = dateTime.hour % 12 == 0 ? 12 : dateTime.hour % 12;
+    final minute = dateTime.minute.toString().padLeft(2, '0');
+    return '오늘 ${isPm ? '오후' : '오전'} $hour12:$minute';
+  }
+
+  Future<void> _submitRoom() async {
+    if (_isSubmitting) return;
+
+    final title = _titleController.text.trim();
+    final content = _contentController.text.trim();
+    final placeName = _placeNameController.text.trim();
+    final address = _addressController.text.trim();
+
+    if (title.isEmpty || content.isEmpty || placeName.isEmpty || address.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('제목, 내용, 장소명, 주소를 모두 입력해 주세요.')),
+      );
+      return;
+    }
+
+    final now = DateTime.now();
+    final startDateTime = _combineDateAndTime(now, _startTime);
+    var endDateTime = _combineDateAndTime(now, _endTime);
+    if (!endDateTime.isAfter(startDateTime)) {
+      endDateTime = endDateTime.add(const Duration(days: 1));
+    }
+
+    final distanceText = _distanceOptions[_distanceIndex];
+    final distanceValue = _distanceValueFromOption(distanceText);
+
+    setState(() {
+      _isSubmitting = true;
+    });
+
+    try {
+      final dio = Dio(
+        BaseOptions(
+          baseUrl: 'https://2768bea4-d656-4d46-91aa-44376277ec23.mock.pstmn.io',
+          headers: {'Content-Type': 'application/json'},
+        ),
+      );
+      final response = await dio.post<dynamic>(
+        '/api/v1/groups',
+        data: <String, dynamic>{
+          'title': title,
+          'content': content,
+          'maxParticipants': _memberCount,
+          'startTime': DateFormat("yyyy-MM-dd'T'HH:mm:ss").format(startDateTime),
+          'endTime': DateFormat("yyyy-MM-dd'T'HH:mm:ss").format(endDateTime),
+          'distance': distanceValue,
+          'location': placeName,
+          'address': address,
+        },
+      );
+
+      final data = response.data;
+      if (!mounted) return;
+      if (data is Map<String, dynamic> && data['success'] == true) {
+        Navigator.of(context).pop<RunCardData>(
+          RunCardData(
+            title: title,
+            time: _formatFeedTime(startDateTime),
+            location: placeName,
+            latitude: _selectedLatLng?.latitude ?? 35.1631,
+            longitude: _selectedLatLng?.longitude ?? 129.0536,
+            currentMembers: 1,
+            maxMembers: _memberCount,
+            participantImageUrls: const [''],
+            endTimeLabel: _formatTimeKo(_endTime),
+            targetDistance: distanceText,
+            placeName: placeName,
+            detailAddress: address,
+            body: content,
+          ),
+        );
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${(data as Map?)?['message'] ?? '그룹런 생성에 실패했습니다.'}')),
+      );
+    } on DioException catch (e) {
+      if (!mounted) return;
+      final message = e.response?.data is Map<String, dynamic>
+          ? (e.response?.data['message']?.toString() ?? '네트워크 오류가 발생했습니다.')
+          : '네트워크 오류가 발생했습니다.';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('요청 처리 중 오류가 발생했습니다.')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
+    }
   }
 
   Future<void> _pickStartTime() async {
@@ -444,7 +572,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                 width: double.infinity,
                 height: 56,
                 child: FilledButton(
-                  onPressed: () => Navigator.of(context).maybePop(),
+                  onPressed: _submitRoom,
                   style: FilledButton.styleFrom(
                     backgroundColor: _submitOrange,
                     foregroundColor: Colors.white,
@@ -456,7 +584,16 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                       fontWeight: FontWeight.w800,
                     ),
                   ),
-                  child: const Text('글쓰기 완료'),
+                  child: _isSubmitting
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.6,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Text('글쓰기 완료'),
                 ),
               ),
             ),
