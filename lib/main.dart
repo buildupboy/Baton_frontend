@@ -10,7 +10,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized(); // runApp 실행 이전이면 필요
 
   await FlutterNaverMap().init(
-    clientId: '0dz77rdfgy',
+    clientId: '02i8s9qcon',
     onAuthFailed: (ex) {
       switch (ex) {
         case NQuotaExceededException(:final message):

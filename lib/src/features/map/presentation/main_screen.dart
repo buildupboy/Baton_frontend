@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:runapp/src/features/social/social_feed_screen.dart';
 import '../../../design/custom_bottom_bar.dart';
 import 'map_home_screen.dart';
 
@@ -15,7 +16,7 @@ class _MainScreenState extends State<MainScreen> {
   final List<Widget> _pages = [
     const MapHomeScreen(), // 0: 러닝
     const Center(child: Text("스팟")), // 1: 스팟
-    const Center(child: Text("소셜")), // 2: 소셜
+    const SocialFeedScreen(), // 2: 소셜
     const Center(child: Text("프로필")), // 3: 프로필
   ];
 

@@ -56,6 +56,7 @@ class RunNotifier extends Notifier<RunMetrics> {
           state.distance,
           state.duration.inSeconds + 1,
         ),
+        averagePace: state.averagePace,
       );
     });
   }
