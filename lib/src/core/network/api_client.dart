@@ -16,12 +16,19 @@ class ApiException implements Exception {
       'ApiException(statusCode: $statusCode, code: $code, message: $message)';
 }
 
+String formatApiErrorMessage(ApiException e) {
+  if (e.statusCode != null) {
+    return '[${e.statusCode}] ${e.message}';
+  }
+  return e.message;
+}
+
 final dioProvider = Provider<Dio>((ref) {
   final session = ref.watch(sessionControllerProvider);
 
   final dio = Dio(
     BaseOptions(
-      baseUrl: 'http://localhost:8080',
+      baseUrl: 'https://equator-swimming-folic.ngrok-free.dev',
       connectTimeout: const Duration(seconds: 10),
       receiveTimeout: const Duration(seconds: 15),
       sendTimeout: const Duration(seconds: 15),
@@ -50,9 +57,16 @@ final dioProvider = Provider<Dio>((ref) {
 dynamic unwrapApiResponse(dynamic data) {
   // Success: { success: true, message: "...", data: ... }
   // Error:   { status: "fail", code: "...", message: "..." }
+  //          { success: false, message: "...", data: "..." }
   if (data is Map<String, dynamic>) {
     if (data['success'] == true) {
       return data['data'];
+    }
+    if (data['success'] == false) {
+      final msg = (data['message'] ?? data['data'] ?? '요청에 실패했습니다.')
+          .toString();
+      final code = data['code']?.toString();
+      throw ApiException(msg, code: code);
     }
     if (data['status'] == 'fail') {
       final msg = (data['message'] ?? '요청에 실패했습니다.').toString();
@@ -76,12 +90,14 @@ Future<T> requestJson<T>(
   } on DioException catch (e) {
     final statusCode = e.response?.statusCode;
     final data = e.response?.data;
-    if (data is Map<String, dynamic> && data['status'] == 'fail') {
-      throw ApiException(
-        (data['message'] ?? '요청에 실패했습니다.').toString(),
-        code: data['code']?.toString(),
-        statusCode: statusCode,
-      );
+    if (data is Map<String, dynamic>) {
+      if (data['status'] == 'fail' || data['success'] == false) {
+        throw ApiException(
+          (data['message'] ?? data['data'] ?? '요청에 실패했습니다.').toString(),
+          code: data['code']?.toString(),
+          statusCode: statusCode,
+        );
+      }
     }
     throw ApiException('네트워크 오류가 발생했습니다.', statusCode: statusCode);
   }

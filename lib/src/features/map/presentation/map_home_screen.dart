@@ -143,7 +143,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
             });
       }
     } on ApiException catch (e) {
-      setState(() => _error = e.message);
+      setState(() => _error = formatApiErrorMessage(e));
     } catch (_) {
       setState(() => _error = '초기화 중 오류가 발생했습니다.');
     } finally {
@@ -271,7 +271,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
         tilt: _trackingTilt,
       );
     } on ApiException catch (e) {
-      setState(() => _error = e.message);
+      setState(() => _error = formatApiErrorMessage(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -313,7 +313,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
         await _loadNearbySpots(p);
       }
     } on ApiException catch (e) {
-      setState(() => _error = e.message);
+      setState(() => _error = formatApiErrorMessage(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -400,7 +400,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
         _map?.addOverlay(marker);
       });
     } on ApiException catch (e) {
-      setState(() => _error = e.message);
+      setState(() => _error = formatApiErrorMessage(e));
     } catch (_) {
       setState(() => _error = '체크인 처리 중 오류가 발생했습니다.');
     } finally {

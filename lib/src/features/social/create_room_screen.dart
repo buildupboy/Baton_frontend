@@ -1,22 +1,24 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_naver_map/flutter_naver_map.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geocoding/geocoding.dart';
-import 'package:dio/dio.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/network/api_client.dart';
 import 'location_picker_screen.dart';
 import 'models/run_card_data.dart';
+import 'social_providers.dart';
 import 'widgets/custom_input_field.dart';
 
-class CreateRoomScreen extends StatefulWidget {
+class CreateRoomScreen extends ConsumerStatefulWidget {
   const CreateRoomScreen({super.key});
 
   @override
-  State<CreateRoomScreen> createState() => _CreateRoomScreenState();
+  ConsumerState<CreateRoomScreen> createState() => _CreateRoomScreenState();
 }
 
-class _CreateRoomScreenState extends State<CreateRoomScreen> {
+class _CreateRoomScreenState extends ConsumerState<CreateRoomScreen> {
   static const Color _background = Color(0xFFF4F4F4);
   static const Color _submitOrange = Color(0xFFF7673B);
   static const Color _accentBrown = Color(0xFFB33010);
@@ -197,58 +199,42 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
     });
 
     try {
-      final dio = Dio(
-        BaseOptions(
-          baseUrl: 'https://2768bea4-d656-4d46-91aa-44376277ec23.mock.pstmn.io',
-          headers: {'Content-Type': 'application/json'},
+      final groupId = await ref.read(groupApiProvider).create(
+            title: title,
+            content: content,
+            maxParticipants: _memberCount,
+            startTimeIsoLocal: DateFormat("yyyy-MM-dd'T'HH:mm:ss").format(startDateTime),
+            endTimeIsoLocal: DateFormat("yyyy-MM-dd'T'HH:mm:ss").format(endDateTime),
+            distanceKm: distanceValue,
+            location: placeName,
+            address: address,
+          );
+      if (!mounted) return;
+      Navigator.of(context).pop<RunCardData>(
+        RunCardData(
+          groupId: groupId,
+          isHost: true,
+          isParticipating: true,
+          title: title,
+          time: _formatFeedTime(startDateTime),
+          location: placeName,
+          latitude: _selectedLatLng?.latitude ?? 35.1631,
+          longitude: _selectedLatLng?.longitude ?? 129.0536,
+          currentMembers: 1,
+          maxMembers: _memberCount,
+          participantImageUrls: const [''],
+          endTimeLabel: _formatTimeKo(_endTime),
+          targetDistance: distanceText,
+          placeName: placeName,
+          detailAddress: address,
+          body: content,
         ),
       );
-      final response = await dio.post<dynamic>(
-        '/api/v1/groups',
-        data: <String, dynamic>{
-          'title': title,
-          'content': content,
-          'maxParticipants': _memberCount,
-          'startTime': DateFormat("yyyy-MM-dd'T'HH:mm:ss").format(startDateTime),
-          'endTime': DateFormat("yyyy-MM-dd'T'HH:mm:ss").format(endDateTime),
-          'distance': distanceValue,
-          'location': placeName,
-          'address': address,
-        },
-      );
-
-      final data = response.data;
+    } on ApiException catch (e) {
       if (!mounted) return;
-      if (data is Map<String, dynamic> && data['success'] == true) {
-        Navigator.of(context).pop<RunCardData>(
-          RunCardData(
-            title: title,
-            time: _formatFeedTime(startDateTime),
-            location: placeName,
-            latitude: _selectedLatLng?.latitude ?? 35.1631,
-            longitude: _selectedLatLng?.longitude ?? 129.0536,
-            currentMembers: 1,
-            maxMembers: _memberCount,
-            participantImageUrls: const [''],
-            endTimeLabel: _formatTimeKo(_endTime),
-            targetDistance: distanceText,
-            placeName: placeName,
-            detailAddress: address,
-            body: content,
-          ),
-        );
-        return;
-      }
-
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${(data as Map?)?['message'] ?? '그룹런 생성에 실패했습니다.'}')),
+        SnackBar(content: Text(formatApiErrorMessage(e))),
       );
-    } on DioException catch (e) {
-      if (!mounted) return;
-      final message = e.response?.data is Map<String, dynamic>
-          ? (e.response?.data['message']?.toString() ?? '네트워크 오류가 발생했습니다.')
-          : '네트워크 오류가 발생했습니다.';
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

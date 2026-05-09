@@ -41,7 +41,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       );
       await ref.read(sessionControllerProvider.notifier).setTokens(tokens);
     } on ApiException catch (e) {
-      setState(() => _error = e.message);
+      setState(() => _error = formatApiErrorMessage(e));
     } catch (_) {
       setState(() => _error = '알 수 없는 오류가 발생했습니다.');
     } finally {

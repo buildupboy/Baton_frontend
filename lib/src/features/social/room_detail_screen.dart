@@ -7,9 +7,17 @@ class RoomDetailScreen extends StatelessWidget {
   const RoomDetailScreen({
     super.key,
     required this.card,
+    this.onJoinPressed,
+    this.onLeavePressed,
+    this.onUpdatePressed,
+    this.onDeletePressed,
   });
 
   final RunCardData card;
+  final VoidCallback? onJoinPressed;
+  final VoidCallback? onLeavePressed;
+  final VoidCallback? onUpdatePressed;
+  final VoidCallback? onDeletePressed;
 
   static const Color _pointOrange = Color(0xFFF7673B);
   static const Color _pageBg = Color(0xFFF4F4F4);
@@ -52,28 +60,128 @@ class RoomDetailScreen extends StatelessWidget {
             top: false,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-              child: SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: FilledButton(
-                  onPressed: () {},
-                  style: FilledButton.styleFrom(
-                    backgroundColor: _pointOrange,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    textStyle: const TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  child: const Text('참여하기'),
-                ),
+              child: _BottomActions(
+                card: card,
+                pointOrange: _pointOrange,
+                onJoinPressed: onJoinPressed,
+                onLeavePressed: onLeavePressed,
+                onUpdatePressed: onUpdatePressed,
+                onDeletePressed: onDeletePressed,
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _BottomActions extends StatelessWidget {
+  const _BottomActions({
+    required this.card,
+    required this.pointOrange,
+    required this.onJoinPressed,
+    required this.onLeavePressed,
+    required this.onUpdatePressed,
+    required this.onDeletePressed,
+  });
+
+  final RunCardData card;
+  final Color pointOrange;
+  final VoidCallback? onJoinPressed;
+  final VoidCallback? onLeavePressed;
+  final VoidCallback? onUpdatePressed;
+  final VoidCallback? onDeletePressed;
+
+  @override
+  Widget build(BuildContext context) {
+    if (card.isHost) {
+      return Row(
+        children: [
+          Expanded(
+            child: SizedBox(
+              height: 52,
+              child: OutlinedButton(
+                onPressed: onUpdatePressed,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: pointOrange,
+                  side: BorderSide(color: pointOrange),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  textStyle: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                child: const Text('수정'),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: SizedBox(
+              height: 52,
+              child: FilledButton(
+                onPressed: onDeletePressed,
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFD64545),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  textStyle: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                child: const Text('삭제'),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    if (card.isParticipating) {
+      return SizedBox(
+        width: double.infinity,
+        height: 52,
+        child: FilledButton(
+          onPressed: onLeavePressed,
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFF8C8C8C),
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+            textStyle: const TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          child: const Text('나가기'),
+        ),
+      );
+    }
+
+    return SizedBox(
+      width: double.infinity,
+      height: 52,
+      child: FilledButton(
+        onPressed: onJoinPressed,
+        style: FilledButton.styleFrom(
+          backgroundColor: pointOrange,
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+          textStyle: const TextStyle(
+            fontSize: 17,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        child: const Text('참여하기'),
       ),
     );
   }

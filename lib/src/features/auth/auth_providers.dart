@@ -4,7 +4,7 @@ import '../../core/network/api_client.dart';
 import 'data/auth_api.dart';
 
 /// true 이면 네트워크 없이 Mock API를 사용합니다.
-const bool useMockApis = true;
+const bool useMockApis = false;
 
 final authApiProvider = Provider<AuthApi>((ref) {
   if (useMockApis) {

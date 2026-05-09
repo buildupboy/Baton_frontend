@@ -1,6 +1,9 @@
 /// 소셜 피드 카드 및 상세 화면에서 공유하는 데이터 모델.
 class RunCardData {
   const RunCardData({
+    this.groupId,
+    this.isHost = false,
+    this.isParticipating = false,
     required this.title,
     required this.time,
     required this.location,
@@ -16,6 +19,9 @@ class RunCardData {
     this.body,
   });
 
+  final int? groupId;
+  final bool isHost;
+  final bool isParticipating;
   final String title;
   final String time;
   final String location;
@@ -51,4 +57,42 @@ class RunCardData {
   String get effectiveBody =>
       body ??
       '모집 내용이 준비 중입니다.\n함께 달릴 분을 기다리고 있어요.';
+
+  RunCardData copyWith({
+    int? groupId,
+    bool? isHost,
+    bool? isParticipating,
+    String? title,
+    String? time,
+    String? location,
+    double? latitude,
+    double? longitude,
+    int? currentMembers,
+    int? maxMembers,
+    List<String>? participantImageUrls,
+    String? endTimeLabel,
+    String? targetDistance,
+    String? placeName,
+    String? detailAddress,
+    String? body,
+  }) {
+    return RunCardData(
+      groupId: groupId ?? this.groupId,
+      isHost: isHost ?? this.isHost,
+      isParticipating: isParticipating ?? this.isParticipating,
+      title: title ?? this.title,
+      time: time ?? this.time,
+      location: location ?? this.location,
+      latitude: latitude ?? this.latitude,
+      longitude: longitude ?? this.longitude,
+      currentMembers: currentMembers ?? this.currentMembers,
+      maxMembers: maxMembers ?? this.maxMembers,
+      participantImageUrls: participantImageUrls ?? this.participantImageUrls,
+      endTimeLabel: endTimeLabel ?? this.endTimeLabel,
+      targetDistance: targetDistance ?? this.targetDistance,
+      placeName: placeName ?? this.placeName,
+      detailAddress: detailAddress ?? this.detailAddress,
+      body: body ?? this.body,
+    );
+  }
 }
